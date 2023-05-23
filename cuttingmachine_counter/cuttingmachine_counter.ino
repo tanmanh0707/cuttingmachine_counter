@@ -33,7 +33,9 @@
 #define LCD_ID    0x9341
 
 // Define the pin for counting
-#define CUTTING_COUNT_PIN 8
+#define CUTTING_COUNT_PIN             12
+#define CUTTING_COUNT_DEBOUNCE        2000  //ms
+#define CUTTING_COUNT_ACTIVE_LEVEL    HIGH
 
 // Define the colors
 #define BLACK 0x0000
@@ -114,56 +116,59 @@ void InitEEPROM()
       }
     }
 
-    // Checking database with RTC
-    DateTime now = RTC_Now();
-    if (now.year() > g_database.crt_year)
+    if (g_rtcReady)
     {
-      Serial.print(F("New year detected! Database year: ")); Serial.print(g_database.crt_year); Serial.print(F(" - RTC year: ")); Serial.println(now.year());
-      g_database.month_count = 0;
-      g_database.crt_month = now.month();
-      g_database.crt_year = now.year();
-      
-      EEPROM_Write32(EEPROM_CRT_YEAR_ADDR, g_database.crt_year);
-      EEPROM_Write32(EEPROM_CRT_MONTH_ADDR, g_database.crt_month);
-      EEPROM_Write32(EEPROM_MONTH_COUNT_ADDR, 0);
-      
-      UTIL_UpdateNewYearDatabase(now);
-    }
-    else if ( now.year() == g_database.crt_year)
-    {
-      if (now.month() != g_database.crt_month)
+      // Checking database with RTC
+      DateTime now = RTC_Now();
+      if (now.year() > g_database.crt_year)
       {
-        Serial.print(F("New month detected! Database month: ")); Serial.print(g_database.crt_month); Serial.print(F(" - RTC month: ")); Serial.println(now.month());
+        Serial.print(F("New year detected! Database year: ")); Serial.print(g_database.crt_year); Serial.print(F(" - RTC year: ")); Serial.println(now.year());
         g_database.month_count = 0;
         g_database.crt_month = now.month();
+        g_database.crt_year = now.year();
+
+        EEPROM_Write32(EEPROM_CRT_YEAR_ADDR, g_database.crt_year);
         EEPROM_Write32(EEPROM_CRT_MONTH_ADDR, g_database.crt_month);
         EEPROM_Write32(EEPROM_MONTH_COUNT_ADDR, 0);
-      }
-    }
-    else if (now.year() < g_database.crt_year)
-    {
-      Serial.println(F("Something wrong with year!!!"));
-      Serial.print(F("Database year: ")); Serial.print(g_database.crt_year); Serial.print(F(" - RTC year: ")); Serial.println(now.year());
-    }
 
-    // Checking week
-    const uint32_t UNIXTIME_NOW = now.unixtime();
-    if (UNIXTIME_NOW > g_database.crt_week_epoch)
-    {
-      if (UNIXTIME_NOW - g_database.crt_week_epoch >= SECONDS_IN_ONE_WEEK)
-      {
-        Serial.print(F("New week detected! Database week: ")); Serial.print(g_database.crt_week_epoch); Serial.print(F(" - RTC Unixtime: ")); Serial.println(UNIXTIME_NOW);
-        g_database.crt_week_epoch = UTIL_GetBeginningOfWeekEpoch(now);
-        Serial.print(F("Database new week: ")); Serial.print(g_database.crt_week_epoch);
-        g_database.week_count = 0;
-        EEPROM_Write32(EEPROM_CRT_WEEK_EPOCH_ADDR, g_database.crt_week_epoch);
-        EEPROM_Write32(EEPROM_WEEK_COUNT_ADDR, 0);
+        UTIL_UpdateNewYearDatabase(now);
       }
-    }
-    else {
-      Serial.println(F("Something wrong with week EPOCH!!!"));
-      Serial.print(F("Database week: ")); Serial.print(g_database.crt_week_epoch); Serial.print(F(" - RTC week: ")); Serial.println(UNIXTIME_NOW);
-    }
+      else if ( now.year() == g_database.crt_year)
+      {
+        if (now.month() != g_database.crt_month)
+        {
+          Serial.print(F("New month detected! Database month: ")); Serial.print(g_database.crt_month); Serial.print(F(" - RTC month: ")); Serial.println(now.month());
+          g_database.month_count = 0;
+          g_database.crt_month = now.month();
+          EEPROM_Write32(EEPROM_CRT_MONTH_ADDR, g_database.crt_month);
+          EEPROM_Write32(EEPROM_MONTH_COUNT_ADDR, 0);
+        }
+      }
+      else if (now.year() < g_database.crt_year)
+      {
+        Serial.println(F("Something wrong with year!!!"));
+        Serial.print(F("Database year: ")); Serial.print(g_database.crt_year); Serial.print(F(" - RTC year: ")); Serial.println(now.year());
+      }
+
+      // Checking week
+      const uint32_t UNIXTIME_NOW = now.unixtime();
+      if (UNIXTIME_NOW > g_database.crt_week_epoch)
+      {
+        if (UNIXTIME_NOW - g_database.crt_week_epoch >= SECONDS_IN_ONE_WEEK)
+        {
+          Serial.print(F("New week detected! Database week: ")); Serial.print(g_database.crt_week_epoch); Serial.print(F(" - RTC Unixtime: ")); Serial.println(UNIXTIME_NOW);
+          g_database.crt_week_epoch = UTIL_GetBeginningOfWeekEpoch(now);
+          Serial.print(F("Database new week: ")); Serial.print(g_database.crt_week_epoch);
+          g_database.week_count = 0;
+          EEPROM_Write32(EEPROM_CRT_WEEK_EPOCH_ADDR, g_database.crt_week_epoch);
+          EEPROM_Write32(EEPROM_WEEK_COUNT_ADDR, 0);
+        }
+      }
+      else {
+        Serial.println(F("Something wrong with week EPOCH!!!"));
+        Serial.print(F("Database week: ")); Serial.print(g_database.crt_week_epoch); Serial.print(F(" - RTC week: ")); Serial.println(UNIXTIME_NOW);
+      }
+    } //g_rtcReady
   }
   else {
     Serial.print(F("Wrong EEPROM ID: ")); Serial.println(eeprom_id, HEX);
@@ -174,16 +179,19 @@ void InitEEPROM()
     EEPROM_Write32(EEPROM_MONTH_COUNT_ADDR, 0);
     memset(g_database.year_counts, 0, NUMBER_OF_YEAR_MAX * sizeof(YearCount_st));
 
-    DateTime now = RTC_Now();
-    g_database.crt_week_epoch = UTIL_GetBeginningOfWeekEpoch(now);
-    g_database.crt_month = now.month();
-    g_database.crt_year = now.year();
+    if (g_rtcReady)
+    {
+      DateTime now = RTC_Now();
+      g_database.crt_week_epoch = UTIL_GetBeginningOfWeekEpoch(now);
+      g_database.crt_month = now.month();
+      g_database.crt_year = now.year();
 
-    // Write init count
-    UTIL_UpdateNewYearDatabase(now);
-    EEPROM_Write32(EEPROM_CRT_WEEK_EPOCH_ADDR, g_database.crt_week_epoch);
-    EEPROM_Write32(EEPROM_CRT_YEAR_ADDR, (uint32_t)g_database.crt_year);
-    EEPROM_Write8(EEPROM_CRT_MONTH_ADDR, g_database.crt_month);
+      // Write init count
+      UTIL_UpdateNewYearDatabase(now);
+      EEPROM_Write32(EEPROM_CRT_WEEK_EPOCH_ADDR, g_database.crt_week_epoch);
+      EEPROM_Write32(EEPROM_CRT_YEAR_ADDR, (uint32_t)g_database.crt_year);
+      EEPROM_Write8(EEPROM_CRT_MONTH_ADDR, g_database.crt_month);
+    } //g_rtcReady
   }
 
   Serial.print(F("EEPROM current year:       ")); Serial.println(g_database.crt_year, DEC);
@@ -313,7 +321,7 @@ void setup()
   tft.fillScreen(BLACK);
   tft.setRotation(1);
   tft.setTextColor(WHITE);
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   Serial.println(F("TFT init done!"));
 
   // Set up the count and totalCount variables
@@ -339,32 +347,33 @@ void loop() {
   unsigned long currentTime = millis();
 
   // Increment the count if the count pin goes high
-  if (digitalRead(CUTTING_COUNT_PIN) == HIGH) {
-    Serial.print(F("Cutting detected at ")); Serial.println(currentTime, DEC);
-    count++;
-    totalCount++;
-    g_database.week_count++;
-    g_database.month_count++;
-    Serial.print(F("Total count: ")); Serial.print(totalCount, DEC);
-    EEPROM_Write32(EEPROM_WEEK_COUNT_ADDR, g_database.week_count);
-    EEPROM_Write32(EEPROM_MONTH_COUNT_ADDR, g_database.month_count);
+  if (currentTime - count_timestamp[0] > CUTTING_COUNT_DEBOUNCE)
+  {
+    if (digitalRead(CUTTING_COUNT_PIN) == HIGH) {
+      Serial.print(F("Cutting detected at ")); Serial.println(currentTime, DEC);
+      count++;
+      totalCount++;
+      g_database.week_count++;
+      g_database.month_count++;
+      Serial.print(F("Total count: ")); Serial.println(totalCount, DEC);
+      EEPROM_Write32(EEPROM_WEEK_COUNT_ADDR, g_database.week_count);
+      EEPROM_Write32(EEPROM_MONTH_COUNT_ADDR, g_database.month_count);
 
-    // Shift the counts array
-    for (int i = CUTTING_SAMPLE_COUNT - 1; i > 0; i--) {
-      count_timestamp[i] = count_timestamp[i - 1];
+      // Shift the counts array
+      for (int i = CUTTING_SAMPLE_COUNT - 1; i > 0; i--) {
+        count_timestamp[i] = count_timestamp[i - 1];
+      }
+      count_timestamp[0] = currentTime;
+
+      // Print
+      for (int i = 0; i < CUTTING_SAMPLE_COUNT; i++) {
+        Serial.print("("); Serial.print(i); Serial.print(") "); Serial.println(count_timestamp[i], DEC);
+      }
+
+      if (numCounts < CUTTING_SAMPLE_COUNT) {
+        numCounts++;
+      }
     }
-    count_timestamp[0] = currentTime;
-
-    // Print
-    for (int i = CUTTING_SAMPLE_COUNT - 1; i > 0; i--) {
-      Serial.print("("); Serial.print(i); Serial.print(") "); Serial.println(count_timestamp[i], DEC);
-    }
-
-    if (numCounts < CUTTING_SAMPLE_COUNT) {
-      numCounts++;
-    }
-
-    delay(100);  //Debounce
   }
 
   // Update the display if one second has passed
@@ -375,7 +384,7 @@ void loop() {
   }
 
   // Check if new week, new month or new year during run time
-  if (currentTime - g_checking_counter_time > 60000)  //Every minute
+  if (g_rtcReady && (currentTime - g_checking_counter_time > 60000))  //Every minute
   {
     DateTime now = RTC_Now();
     const uint32_t unixtime_now = now.unixtime();
@@ -512,7 +521,9 @@ uint32_t UTIL_GetBeginningOfWeekEpoch(DateTime now)
 
 void EEPROM_Write8(int addr, byte value)
 {
-  EEPROM.update(addr, value);
+  if (g_rtcReady) {
+    EEPROM.update(addr, value);
+  }
 }
 
 byte EEPROM_Read8(int addr)
@@ -524,10 +535,12 @@ byte EEPROM_Read8(int addr)
 
 void EEPROM_Write32(int addr, uint32_t value)
 {
-  EEPROM.update(addr++, (byte)(value >> 24));
-  EEPROM.update(addr++, (byte)(value >> 16));
-  EEPROM.update(addr++, (byte)(value >> 8));
-  EEPROM.update(addr,   (byte)(value));
+  if (g_rtcReady) {
+    EEPROM.update(addr++, (byte)(value >> 24));
+    EEPROM.update(addr++, (byte)(value >> 16));
+    EEPROM.update(addr++, (byte)(value >> 8));
+    EEPROM.update(addr,   (byte)(value));
+  }
 }
 
 uint32_t EEPROM_Read32(int addr)
